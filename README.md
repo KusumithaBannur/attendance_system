@@ -230,9 +230,7 @@ npm test           # Run tests
 4. Push to the branch (`git push origin feature/amazing-feature`)
 5. Open a Pull Request
 
-## 📝 License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
 ## 🆘 Support
 
@@ -254,15 +252,4 @@ If you encounter any issues:
 - [ ] Mobile app using React Native
 - [ ] Real-time notifications using WebSockets
 
-## 🏆 Acknowledgments
 
-- Built with modern web technologies
-- Responsive design principles
-- Security best practices
-- Production-ready deployment configuration
-
----
-
-**Made with ❤️ for educational institutions**
-
-For questions or support, please open an issue or contact the development team.
