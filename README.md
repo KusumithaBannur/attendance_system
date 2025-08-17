@@ -2,7 +2,7 @@
 
 A full-stack web application for managing student attendance built with React.js, Node.js, Express, and MongoDB.
 
-![Attendance System Demo]
+
 ![React](https://img.shields.io/badge/React-18.x-blue)
 ![Node.js](https://img.shields.io/badge/Node.js-18.x-green)
 ![MongoDB](https://img.shields.io/badge/MongoDB-Atlas-green)
