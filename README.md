@@ -2,6 +2,7 @@
 
 A full-stack web application for teachers to mark and track student attendance, built with **React (TypeScript)**, **Node.js / Express** and **MySQL**.
 
+![CI](https://github.com/KusumithaBannur/attendance_system/actions/workflows/ci.yml/badge.svg)
 ![React](https://img.shields.io/badge/React-19-blue)
 ![Node.js](https://img.shields.io/badge/Node.js-18%2B-green)
 ![MySQL](https://img.shields.io/badge/MySQL-8.0-orange)
@@ -91,8 +92,11 @@ attendance_system/
 │   ├── database/schema.sql       # Table definitions
 │   ├── routes/authRoutes.js      # Register, login, profile, verifyToken middleware
 │   ├── routes/attendanceRoutes.js# Students, mark, report, by-date, requireTeacher middleware
+│   ├── tests/                    # Jest unit tests and Supertest API tests
+│   ├── utils/attendanceStats.js  # Report statistics (percentage etc.)
 │   ├── seedData.js               # Creates a demo teacher and 5 students
-│   ├── server.js                 # Express app setup
+│   ├── app.js                    # Express app: middleware and routes
+│   ├── server.js                 # Connects to MySQL and starts listening
 │   └── .env.example
 └── frontend/
     └── src/
@@ -134,6 +138,36 @@ npm start               # http://localhost:3000
 - **Email:** teacher@example.com
 - **Password:** password123
 
+## Testing
+
+**Backend** uses Jest and Supertest:
+- **Unit tests** check the statistics calculation on its own, with no database.
+- **API tests** send real HTTP requests to the Express app and check the responses and the database. They cover login, registration, role checks, marking and re-marking attendance, and report access rules.
+
+The API tests use a separate `attendance_system_test` database, which they create from `schema.sql` and empty before every test, so your real data is never touched.
+
+```bash
+cd backend
+npm test
+```
+
+**Frontend** uses React Testing Library:
+```bash
+cd frontend
+npm test
+```
+
+## Continuous Integration
+
+GitHub Actions ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) runs on every push and pull request to `main`:
+
+| Job | Steps |
+|---|---|
+| Backend | Starts a temporary MySQL 8 server, runs `npm audit` (fails on high or critical vulnerabilities in production dependencies), then runs all backend tests |
+| Frontend | Runs the frontend tests, then a production build that fails on any warning |
+
+If any step fails, the commit is marked as failed on GitHub.
+
 ## Environment Variables
 
 **backend/.env**
@@ -169,4 +203,4 @@ REACT_APP_API_URL=https://your-api-host/api
 - Student-facing page to view their own attendance report
 - Attendance reports page with charts and CSV export
 - Classes / sections, so each teacher sees only their students
-- Rate limiting on login, and automated tests
+- Rate limiting on login
