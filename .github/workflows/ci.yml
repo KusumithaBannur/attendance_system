@@ -1,0 +1,89 @@
+# Continuous Integration: runs on every push and pull request to main.
+# If any step fails, GitHub marks the commit with a red cross and the change should not be merged.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  backend:
+    name: Backend - security audit and API tests
+    runs-on: ubuntu-latest
+
+    # A throwaway MySQL server that exists only while this job runs
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: root
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h localhost -proot"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=20
+
+    defaults:
+      run:
+        working-directory: backend
+
+    env:
+      DB_HOST: 127.0.0.1
+      DB_PORT: 3306
+      DB_USER: root
+      DB_PASSWORD: root
+      TEST_DB_NAME: attendance_system_test
+      JWT_SECRET: ci-test-secret
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+
+      # npm ci installs exactly what package-lock.json says, so CI matches local
+      - run: npm ci
+
+      # DevSecOps: fail the build if a production dependency has a known high/critical vulnerability
+      - name: Security audit
+        run: npm audit --omit=dev --audit-level=high
+
+      - name: Run tests
+        run: npm test
+
+  frontend:
+    name: Frontend - tests and production build
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: frontend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - run: npm ci
+
+      - name: Run tests
+        run: npm test -- --watchAll=false
+        env:
+          CI: true
+
+      # CI=true also makes the build fail on any compiler or lint warning
+      - name: Build
+        run: npm run build
+        env:
+          CI: true

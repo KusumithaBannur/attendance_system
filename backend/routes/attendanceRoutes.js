@@ -1,6 +1,7 @@
 const express = require('express');
 const { pool } = require('../config/db');
 const { verifyToken } = require('./authRoutes');
+const { calculateStatistics } = require('../utils/attendanceStats');
 const router = express.Router();
 
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
@@ -158,18 +159,9 @@ router.get('/report/:studentId', verifyToken, async (req, res) => {
       params
     );
 
-    const totalDays = Number(stats.totalDays);
-    const presentDays = Number(stats.presentDays);
-    const attendancePercentage = totalDays > 0 ? Number(((presentDays / totalDays) * 100).toFixed(2)) : 0;
-
     res.json({
       student,
-      statistics: {
-        totalDays,
-        presentDays,
-        absentDays: totalDays - presentDays,
-        attendancePercentage
-      },
+      statistics: calculateStatistics(Number(stats.totalDays), Number(stats.presentDays)),
       records
     });
   } catch (error) {
