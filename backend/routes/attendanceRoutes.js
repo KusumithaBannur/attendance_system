@@ -109,6 +109,13 @@ router.get('/report/:studentId', verifyToken, async (req, res) => {
   try {
     const { studentId } = req.params;
     const { startDate, endDate } = req.query;
+    
+    // Teachers can see any report; students can only see their own
+    const [requesterRows] = await pool.query('SELECT role FROM users WHERE id = ?', [req.userId]);
+    const requester = requesterRows[0];
+    if (!requester || (requester.role !== 'teacher' && Number(studentId) !== req.userId)) {
+      return res.status(403).json({ message: 'You can only view your own attendance report' });
+    }
 
     // Validate student exists
     const [studentRows] = await pool.query(

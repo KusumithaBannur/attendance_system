@@ -78,7 +78,7 @@ See [`backend/database/schema.sql`](backend/database/schema.sql).
 | GET | `/students` | Teacher | List all students |
 | POST | `/mark` | Teacher | Mark attendance: `{ date: "YYYY-MM-DD", attendanceData: [{ studentId, status }] }` |
 | GET | `/by-date?date=YYYY-MM-DD` | Teacher | All records for one date |
-| GET | `/report/:studentId?startDate=&endDate=` | Logged in | One student's records and statistics |
+| GET | `/report/:studentId?startDate=&endDate=` | Teacher, or that student | One student's records and statistics |
 
 `GET /api/health` returns a simple status message.
 
@@ -160,12 +160,13 @@ REACT_APP_API_URL=https://your-api-host/api
 - All SQL uses `?` placeholders (parameterized queries) to prevent SQL injection.
 - Public registration always creates a student; the role sent by the client is ignored, so users cannot make themselves teachers.
 - Login returns the same error for an unknown email and a wrong password.
+- Students can only fetch their own attendance report; teachers can fetch any (object-level authorization).
 - CORS only allows the configured frontend origin.
 
 ## Future Improvements
 
 - Admin-only endpoint for creating teacher accounts
-- Student login to view their own attendance (restrict `/report` to the student themself or a teacher)
+- Student-facing page to view their own attendance report
 - Attendance reports page with charts and CSV export
 - Classes / sections, so each teacher sees only their students
 - Rate limiting on login, and automated tests
