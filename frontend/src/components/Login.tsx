@@ -67,7 +67,6 @@ const Login: React.FC = () => {
         <div className="demo-credentials">
           <h4>Demo Credentials:</h4>
           <p><strong>Teacher:</strong> teacher@example.com / password123</p>
-          <p><em>Note: You'll need to register this user first or use the registration endpoint</em></p>
         </div>
       </div>
     </div>

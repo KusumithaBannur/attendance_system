@@ -1,255 +1,171 @@
-# 📚 Attendance Management System
+# Attendance Management System
 
-A full-stack web application for managing student attendance built with React.js, Node.js, Express, and MongoDB.
+A full-stack web application for teachers to mark and track student attendance, built with **React (TypeScript)**, **Node.js / Express** and **MySQL**.
 
+![React](https://img.shields.io/badge/React-19-blue)
+![Node.js](https://img.shields.io/badge/Node.js-18%2B-green)
+![MySQL](https://img.shields.io/badge/MySQL-8.0-orange)
 
-![React](https://img.shields.io/badge/React-18.x-blue)
-![Node.js](https://img.shields.io/badge/Node.js-18.x-green)
-![MongoDB](https://img.shields.io/badge/MongoDB-Atlas-green)
+## Features
 
-## 🌟 Features
+- **Teacher login** with JWT authentication and bcrypt-hashed passwords
+- **Role-based access**: only teachers can view students and mark attendance
+- **Mark attendance** for any date, per student or with "Mark all present / absent"
+- **Edit past attendance**: picking a date loads what was already saved, and re-submitting updates it instead of creating duplicates
+- **Live counts** of present, absent and total students while marking
+- **Student report API** with total days, present days and attendance percentage, with an optional date range
 
-### 🔐 Authentication System
-- **Secure Login**: JWT-based authentication with password hashing
-- **Role-based Access**: Teacher and student roles with proper validation
-- **Session Management**: Automatic logout and token refresh
+## Tech Stack
 
-### 📊 Attendance Management
-- **Real-time Dashboard**: Live statistics (Present/Absent/Total counts)
-- **Individual Controls**: Mark each student as Present/Absent
-- **Bulk Operations**: Mark all students present/absent with one click
-- **Date Selection**: Choose specific dates for attendance marking
-- **Visual Feedback**: Student cards highlight when attendance changes
+| Layer | Technology |
+|---|---|
+| Frontend | React 19 with TypeScript, React Router, Axios, CSS3 |
+| Backend | Node.js, Express.js |
+| Database | MySQL 8 (`mysql2` driver, parameterized queries) |
+| Auth | JSON Web Tokens (`jsonwebtoken`), `bcryptjs` |
+| Other | `cors`, `dotenv` |
 
-### 🎨 User Interface
-- **Modern Design**: Professional gradient backgrounds and smooth animations
-- **Responsive Layout**: Works perfectly on desktop and mobile devices
-- **Intuitive Controls**: Clean typography and user-friendly interface
-- **Real-time Updates**: Statistics update instantly as you mark attendance
-
-## 🚀 Live Demo
-
-- **Frontend**: [https://your-app.vercel.app](https://your-app.vercel.app)
-- **Backend API**: [https://your-backend.onrender.com](https://your-backend.onrender.com)
-
-### Demo Credentials
-- **Teacher**: teacher@example.com / password123
-
-## 🛠️ Tech Stack
-
-### Backend
-- **Node.js** - Runtime environment
-- **Express.js** - Web framework
-- **MongoDB** - Database with Mongoose ODM
-- **JWT** - Authentication tokens
-- **bcryptjs** - Password hashing
-- **CORS** - Cross-origin resource sharing
-
-### Frontend
-- **React.js** - UI library with TypeScript
-- **React Router** - Client-side routing
-- **Axios** - HTTP client for API calls
-- **CSS3** - Modern styling with gradients and animations
-
-### Deployment
-- **Frontend**: Vercel (Static hosting)
-- **Backend**: Render (Node.js hosting)
-- **Database**: MongoDB Atlas (Cloud database)
-
-## 📁 Project Structure
+## Architecture
 
 ```
-attendance-system/
-├── backend/                 # Node.js API server
-│   ├── config/
-│   │   └── db.js           # MongoDB connection
-│   ├── models/
-│   │   ├── User.js         # User schema (teachers & students)
-│   │   └── Attendance.js   # Attendance records schema
-│   ├── routes/
-│   │   ├── authRoutes.js   # Authentication endpoints
-│   │   └── attendanceRoutes.js # Attendance management endpoints
-│   ├── server.js           # Express server setup
-│   ├── seedData.js         # Database seeding script
-│   └── package.json
-├── frontend/               # React application
-│   ├── src/
-│   │   ├── components/
-│   │   │   ├── Login.tsx   # Login page
-│   │   │   ├── Dashboard.tsx # Main attendance dashboard
-│   │   │   └── ProtectedRoute.tsx # Route protection
-│   │   ├── contexts/
-│   │   │   └── AuthContext.tsx # Authentication state management
-│   │   ├── services/
-│   │   │   └── api.ts      # API client configuration
-│   │   └── App.tsx         # Main app component
-│   └── package.json
-├── DEPLOYMENT_GUIDE.md     # Detailed deployment instructions
-└── README.md               # This file
+React (localhost:3000)  ──HTTP + JSON, Bearer token──▶  Express API (localhost:5000)  ──SQL──▶  MySQL
 ```
 
-## 🚀 Quick Start (Local Development)
+- The React app calls the API through one Axios instance. A request interceptor adds the JWT to every call; a response interceptor logs the user out on a `401`.
+- Express routes are protected by two middleware functions: `verifyToken` (is the user logged in?) and `requireTeacher` (is the user a teacher?).
+
+## Database Schema
+
+See [`backend/database/schema.sql`](backend/database/schema.sql).
+
+**users**
+
+| Column | Type | Notes |
+|---|---|---|
+| id | INT, PK, AUTO_INCREMENT | |
+| name | VARCHAR(100) | |
+| email | VARCHAR(255), UNIQUE | stored lowercase |
+| password | VARCHAR(255) | bcrypt hash |
+| role | ENUM('teacher','student') | |
+| created_at, updated_at | TIMESTAMP | |
+
+**attendance**
+
+| Column | Type | Notes |
+|---|---|---|
+| id | INT, PK, AUTO_INCREMENT | |
+| student_id | INT, FK → users.id | ON DELETE CASCADE |
+| date | DATE | |
+| status | ENUM('Present','Absent') | |
+| marked_by | INT, FK → users.id | teacher who marked it |
+| created_at, updated_at | TIMESTAMP | |
+
+`UNIQUE (student_id, date)` guarantees one record per student per day. Marking attendance uses a single bulk
+`INSERT ... ON DUPLICATE KEY UPDATE`, so re-submitting a date updates the existing rows.
+
+## API Endpoints
+
+### Auth (`/api/auth`)
+| Method | Path | Access | Description |
+|---|---|---|---|
+| POST | `/register` | Public | Register a new **student** account |
+| POST | `/login` | Public | Log in, returns a JWT and the user |
+| GET | `/profile` | Logged in | Current user's profile |
+
+### Attendance (`/api/attendance`)
+| Method | Path | Access | Description |
+|---|---|---|---|
+| GET | `/students` | Teacher | List all students |
+| POST | `/mark` | Teacher | Mark attendance: `{ date: "YYYY-MM-DD", attendanceData: [{ studentId, status }] }` |
+| GET | `/by-date?date=YYYY-MM-DD` | Teacher | All records for one date |
+| GET | `/report/:studentId?startDate=&endDate=` | Logged in | One student's records and statistics |
+
+`GET /api/health` returns a simple status message.
+
+## Project Structure
+
+```
+attendance_system/
+├── backend/
+│   ├── config/db.js              # MySQL connection pool
+│   ├── database/schema.sql       # Table definitions
+│   ├── routes/authRoutes.js      # Register, login, profile, verifyToken middleware
+│   ├── routes/attendanceRoutes.js# Students, mark, report, by-date, requireTeacher middleware
+│   ├── seedData.js               # Creates a demo teacher and 5 students
+│   ├── server.js                 # Express app setup
+│   └── .env.example
+└── frontend/
+    └── src/
+        ├── components/           # Login, Dashboard, ProtectedRoute
+        ├── contexts/AuthContext.tsx  # Global login state (React Context)
+        ├── services/api.ts       # Axios instance, API calls, TypeScript types
+        └── App.tsx               # Routes
+```
+
+## Running Locally
 
 ### Prerequisites
-- Node.js (v18 or higher)
-- MongoDB (local installation or Atlas)
-- npm or yarn
+- Node.js 18 or later
+- MySQL 8
 
-### 1. Clone the Repository
+### 1. Create the database
+Run `backend/database/schema.sql` in MySQL Workbench, or:
 ```bash
-git clone https://github.com/KusumithaBannur/attendance-system.git
-cd attendance-system
+mysql -u root -p < backend/database/schema.sql
 ```
 
-### 2. Backend Setup
+### 2. Start the backend
 ```bash
 cd backend
 npm install
-
-# Create .env file
-cp .env.example .env
-# Edit .env with your MongoDB URI and JWT secret
-
-# Seed the database with demo data
-npm run seed
-
-# Start the backend server
-npm start
+cp .env.example .env    # then set DB_PASSWORD and JWT_SECRET
+npm run seed            # demo teacher + 5 students
+npm start               # http://localhost:5000
 ```
 
-The backend will run on `http://localhost:5000`
-
-### 3. Frontend Setup
+### 3. Start the frontend
 ```bash
 cd frontend
 npm install
-
-# Start the frontend development server
-npm start
+npm start               # http://localhost:3000
 ```
 
-The frontend will run on `http://localhost:3000`
+### 4. Log in
+- **Email:** teacher@example.com
+- **Password:** password123
 
-### 4. Access the Application
-1. Open `http://localhost:3000` in your browser
-2. Login with demo credentials:
-   - **Email**: teacher@example.com
-   - **Password**: password123
+## Environment Variables
 
-## 🌐 Deployment
-
-For detailed deployment instructions, see [DEPLOYMENT_GUIDE.md](./DEPLOYMENT_GUIDE.md)
-
-### Quick Deployment Summary
-
-1. **Database**: Setup MongoDB Atlas cluster
-2. **Backend**: Deploy to Render with environment variables
-3. **Frontend**: Deploy to Vercel with production API URL
-4. **Configuration**: Update CORS and API endpoints
-
-## 📊 API Endpoints
-
-### Authentication
-- `POST /api/auth/login` - Teacher login
-- `POST /api/auth/register` - Register new user
-- `GET /api/auth/profile` - Get current user profile
-
-### Attendance Management
-- `GET /api/attendance/students` - Get all students
-- `POST /api/attendance/mark` - Mark attendance for students
-- `GET /api/attendance/report/:studentId` - Get student attendance report
-- `GET /api/attendance/by-date?date=YYYY-MM-DD` - Get attendance by date
-
-## 🔐 Environment Variables
-
-### Backend (.env)
-```bash
+**backend/.env**
+```
 PORT=5000
-MONGODB_URI=mongodb://localhost:27017/attendance_system
-JWT_SECRET=your_jwt_secret_key_here
+DB_HOST=localhost
+DB_PORT=3306
+DB_USER=root
+DB_PASSWORD=your_mysql_password
+DB_NAME=attendance_system
+JWT_SECRET=a_long_random_secret
 NODE_ENV=development
+FRONTEND_URL=http://localhost:3000   # allowed CORS origin in production
 ```
 
-### Production Environment
-```bash
-NODE_ENV=production
-MONGODB_URI=mongodb+srv://user:pass@cluster.mongodb.net/attendance_system
-JWT_SECRET=your_super_secure_jwt_secret
-PORT=10000
+**frontend** (only needed when the API is not on localhost:5000)
+```
+REACT_APP_API_URL=https://your-api-host/api
 ```
 
-## 🧪 Testing
+## Security
 
-The application has been thoroughly tested with:
+- Passwords are hashed with bcrypt (10 salt rounds); hashes are never returned by the API.
+- All SQL uses `?` placeholders (parameterized queries) to prevent SQL injection.
+- Public registration always creates a student; the role sent by the client is ignored, so users cannot make themselves teachers.
+- Login returns the same error for an unknown email and a wrong password.
+- CORS only allows the configured frontend origin.
 
-✅ **Authentication Flow**
-- Login with valid credentials
-- JWT token generation and validation
-- Automatic logout on token expiration
+## Future Improvements
 
-✅ **Attendance Management**
-- Individual student attendance marking
-- Bulk operations (mark all present/absent)
-- Real-time statistics updates
-- Date-specific attendance records
-
-✅ **User Interface**
-- Responsive design on multiple screen sizes
-- Smooth animations and transitions
-- Error handling and user feedback
-
-## 🔧 Development
-
-### Available Scripts
-
-#### Backend
-```bash
-npm start          # Start production server
-npm run dev        # Start development server with nodemon
-npm run seed       # Seed database with demo data
-```
-
-#### Frontend
-```bash
-npm start          # Start development server
-npm run build      # Create production build
-npm test           # Run tests
-```
-
-### Code Quality
-- TypeScript for type safety
-- ESLint for code linting
-- Proper error handling
-- Security best practices
-
-## 🤝 Contributing
-
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
-
-
-
-## 🆘 Support
-
-If you encounter any issues:
-
-1. Check the [DEPLOYMENT_GUIDE.md](./DEPLOYMENT_GUIDE.md) for deployment help
-2. Review the troubleshooting section in the deployment guide
-3. Check the logs in your hosting platform dashboards
-4. Verify all environment variables are set correctly
-
-## 🎯 Future Enhancements
-
-- [ ] Student login to view their own attendance
-- [ ] Attendance reports with date ranges and export to PDF/Excel
-- [ ] Email notifications for low attendance
-- [ ] Multiple classes/sections support
-- [ ] Graphical attendance reports with charts
-- [ ] Admin panel for user management
-- [ ] Mobile app using React Native
-- [ ] Real-time notifications using WebSockets
-
-
+- Admin-only endpoint for creating teacher accounts
+- Student login to view their own attendance (restrict `/report` to the student themself or a teacher)
+- Attendance reports page with charts and CSV export
+- Classes / sections, so each teacher sees only their students
+- Rate limiting on login, and automated tests

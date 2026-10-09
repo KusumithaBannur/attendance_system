@@ -11,8 +11,12 @@
     "seed": "node seedData.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
-  "keywords": ["attendance", "management", "education"],
-  "author": "Your Name",
+  "keywords": [
+    "attendance",
+    "management",
+    "education"
+  ],
+  "author": "Kusumitha Bannur",
   "license": "MIT",
   "description": "Backend API for Attendance Management System",
   "dependencies": {
@@ -21,6 +25,6 @@
     "dotenv": "^17.2.1",
     "express": "^4.18.2",
     "jsonwebtoken": "^9.0.2",
-    "mongoose": "^8.17.1"
+    "mysql2": "^3.24.5"
   }
 }

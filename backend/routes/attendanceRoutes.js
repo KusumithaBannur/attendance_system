@@ -1,13 +1,23 @@
 const express = require('express');
-const User = require('../models/User');
-const Attendance = require('../models/Attendance');
+const { pool } = require('../config/db');
 const { verifyToken } = require('./authRoutes');
 const router = express.Router();
+
+const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+
+// Today's date as 'YYYY-MM-DD' in the server's local time
+const today = () => {
+  const now = new Date();
+  const month = String(now.getMonth() + 1).padStart(2, '0');
+  const day = String(now.getDate()).padStart(2, '0');
+  return `${now.getFullYear()}-${month}-${day}`;
+};
 
 // Middleware to check if user is a teacher
 const requireTeacher = async (req, res, next) => {
   try {
-    const user = await User.findById(req.userId);
+    const [rows] = await pool.query('SELECT id, name, email, role FROM users WHERE id = ?', [req.userId]);
+    const user = rows[0];
     if (!user || user.role !== 'teacher') {
       return res.status(403).json({ message: 'Access denied. Teacher role required.' });
     }
@@ -21,7 +31,9 @@ const requireTeacher = async (req, res, next) => {
 // Get all students
 router.get('/students', verifyToken, requireTeacher, async (req, res) => {
   try {
-    const students = await User.find({ role: 'student' }).select('-password');
+    const [students] = await pool.query(
+      "SELECT id, name, email, role FROM users WHERE role = 'student' ORDER BY name"
+    );
     res.json({ students });
   } catch (error) {
     console.error('Error fetching students:', error);
@@ -36,68 +48,49 @@ router.post('/mark', verifyToken, requireTeacher, async (req, res) => {
     const teacherId = req.userId;
 
     // Validate input
-    if (!attendanceData || !Array.isArray(attendanceData)) {
+    if (!Array.isArray(attendanceData) || attendanceData.length === 0) {
       return res.status(400).json({ message: 'Invalid attendance data format' });
     }
 
-    const attendanceDate = date ? new Date(date) : new Date();
-    // Set time to start of day for consistent date comparison
-    attendanceDate.setHours(0, 0, 0, 0);
+    const attendanceDate = date || today();
+    if (!DATE_PATTERN.test(attendanceDate)) {
+      return res.status(400).json({ message: 'Date must be in YYYY-MM-DD format' });
+    }
 
+    // Fetch all the students in one query instead of one query per student
+    const studentIds = attendanceData.map(record => record.studentId);
+    const [students] = await pool.query(
+      "SELECT id, name FROM users WHERE role = 'student' AND id IN (?)",
+      [studentIds]
+    );
+    const studentNames = new Map(students.map(s => [s.id, s.name]));
+
+    const rows = [];
     const results = [];
     const errors = [];
 
-    for (const record of attendanceData) {
-      try {
-        const { studentId, status } = record;
-
-        // Validate student exists
-        const student = await User.findById(studentId);
-        if (!student || student.role !== 'student') {
-          errors.push(`Invalid student ID: ${studentId}`);
-          continue;
-        }
-
-        // Check if attendance already exists for this student and date
-        const existingAttendance = await Attendance.findOne({
-          student: studentId,
-          date: {
-            $gte: attendanceDate,
-            $lt: new Date(attendanceDate.getTime() + 24 * 60 * 60 * 1000)
-          }
-        });
-
-        if (existingAttendance) {
-          // Update existing attendance
-          existingAttendance.status = status;
-          existingAttendance.markedBy = teacherId;
-          await existingAttendance.save();
-          results.push({
-            studentId,
-            studentName: student.name,
-            status,
-            action: 'updated'
-          });
-        } else {
-          // Create new attendance record
-          const attendance = new Attendance({
-            student: studentId,
-            date: attendanceDate,
-            status,
-            markedBy: teacherId
-          });
-          await attendance.save();
-          results.push({
-            studentId,
-            studentName: student.name,
-            status,
-            action: 'created'
-          });
-        }
-      } catch (error) {
-        console.error(`Error processing attendance for student ${record.studentId}:`, error);
-        errors.push(`Error processing student ${record.studentId}: ${error.message}`);
+    for (const { studentId, status } of attendanceData) {
+      if (!studentNames.has(Number(studentId))) {
+        errors.push(`Invalid student ID: ${studentId}`);
+        continue;
       }
+      if (status !== 'Present' && status !== 'Absent') {
+        errors.push(`Invalid status for student ${studentId}: ${status}`);
+        continue;
+      }
+      rows.push([studentId, attendanceDate, status, teacherId]);
+      results.push({ studentId, studentName: studentNames.get(Number(studentId)), status });
+    }
+
+    // Insert every row at once. If a (student_id, date) row already exists,
+    // the UNIQUE key makes MySQL update it instead of creating a duplicate.
+    if (rows.length > 0) {
+      await pool.query(
+        `INSERT INTO attendance (student_id, date, status, marked_by)
+         VALUES ? AS new
+         ON DUPLICATE KEY UPDATE status = new.status, marked_by = new.marked_by`,
+        [rows]
+      );
     }
 
     res.json({
@@ -118,51 +111,59 @@ router.get('/report/:studentId', verifyToken, async (req, res) => {
     const { startDate, endDate } = req.query;
 
     // Validate student exists
-    const student = await User.findById(studentId);
-    if (!student || student.role !== 'student') {
+    const [studentRows] = await pool.query(
+      "SELECT id, name, email FROM users WHERE id = ? AND role = 'student'",
+      [studentId]
+    );
+    const student = studentRows[0];
+    if (!student) {
       return res.status(404).json({ message: 'Student not found' });
     }
 
-    // Build date filter
-    let dateFilter = {};
-    if (startDate || endDate) {
-      dateFilter.date = {};
-      if (startDate) {
-        dateFilter.date.$gte = new Date(startDate);
-      }
-      if (endDate) {
-        const endDateTime = new Date(endDate);
-        endDateTime.setHours(23, 59, 59, 999);
-        dateFilter.date.$lte = endDateTime;
-      }
+    // Build the optional date filter
+    let dateFilter = '';
+    const params = [studentId];
+    if (startDate) {
+      dateFilter += ' AND a.date >= ?';
+      params.push(startDate);
+    }
+    if (endDate) {
+      dateFilter += ' AND a.date <= ?';
+      params.push(endDate);
     }
 
-    const attendanceRecords = await Attendance.find({
-      student: studentId,
-      ...dateFilter
-    })
-    .populate('markedBy', 'name email')
-    .sort({ date: -1 });
+    // Records, with the name of the teacher who marked each one
+    const [records] = await pool.query(
+      `SELECT a.id, a.date, a.status, t.name AS markedByName, t.email AS markedByEmail
+       FROM attendance a
+       JOIN users t ON t.id = a.marked_by
+       WHERE a.student_id = ?${dateFilter}
+       ORDER BY a.date DESC`,
+      params
+    );
 
-    // Calculate statistics
-    const totalDays = attendanceRecords.length;
-    const presentDays = attendanceRecords.filter(record => record.status === 'Present').length;
-    const absentDays = totalDays - presentDays;
-    const attendancePercentage = totalDays > 0 ? ((presentDays / totalDays) * 100).toFixed(2) : 0;
+    // Statistics calculated by MySQL
+    const [[stats]] = await pool.query(
+      `SELECT COUNT(*) AS totalDays,
+              COALESCE(SUM(a.status = 'Present'), 0) AS presentDays
+       FROM attendance a
+       WHERE a.student_id = ?${dateFilter}`,
+      params
+    );
+
+    const totalDays = Number(stats.totalDays);
+    const presentDays = Number(stats.presentDays);
+    const attendancePercentage = totalDays > 0 ? Number(((presentDays / totalDays) * 100).toFixed(2)) : 0;
 
     res.json({
-      student: {
-        id: student._id,
-        name: student.name,
-        email: student.email
-      },
+      student,
       statistics: {
         totalDays,
         presentDays,
-        absentDays,
-        attendancePercentage: parseFloat(attendancePercentage)
+        absentDays: totalDays - presentDays,
+        attendancePercentage
       },
-      records: attendanceRecords
+      records
     });
   } catch (error) {
     console.error('Error fetching attendance report:', error);
@@ -174,23 +175,20 @@ router.get('/report/:studentId', verifyToken, async (req, res) => {
 router.get('/by-date', verifyToken, requireTeacher, async (req, res) => {
   try {
     const { date } = req.query;
-    const queryDate = new Date(date);
-    queryDate.setHours(0, 0, 0, 0);
+    if (!date || !DATE_PATTERN.test(date)) {
+      return res.status(400).json({ message: 'Date must be in YYYY-MM-DD format' });
+    }
 
-    const nextDay = new Date(queryDate);
-    nextDay.setDate(nextDay.getDate() + 1);
+    const [records] = await pool.query(
+      `SELECT a.id, a.student_id AS studentId, u.name AS studentName, u.email AS studentEmail, a.status, a.date
+       FROM attendance a
+       JOIN users u ON u.id = a.student_id
+       WHERE a.date = ?
+       ORDER BY u.name`,
+      [date]
+    );
 
-    const attendanceRecords = await Attendance.find({
-      date: {
-        $gte: queryDate,
-        $lt: nextDay
-      }
-    }).populate('student', 'name email');
-
-    res.json({
-      date: queryDate,
-      records: attendanceRecords
-    });
+    res.json({ date, records });
   } catch (error) {
     console.error('Error fetching attendance by date:', error);
     res.status(500).json({ message: 'Server error while fetching attendance' });

@@ -1,75 +1,44 @@
 require('dotenv').config();
-const mongoose = require('mongoose');
-const User = require('./models/User');
-const connectDB = require('./config/db');
+const bcrypt = require('bcryptjs');
+const { pool, connectDB } = require('./config/db');
 
 const seedData = async () => {
   try {
-    // Connect to MongoDB
     await connectDB();
 
-    // Clear existing data
-    await User.deleteMany({});
-    console.log('Cleared existing users');
+    // Clear existing data (attendance first, because it references users)
+    await pool.query('DELETE FROM attendance');
+    await pool.query('DELETE FROM users');
+    await pool.query('ALTER TABLE attendance AUTO_INCREMENT = 1');
+    await pool.query('ALTER TABLE users AUTO_INCREMENT = 1');
+    console.log('Cleared existing data');
 
-    // Create a teacher
-    const teacher = new User({
-      name: 'John Teacher',
-      email: 'teacher@example.com',
-      password: 'password123',
-      role: 'teacher'
-    });
-    await teacher.save();
-    console.log('Created teacher:', teacher.email);
+    const hashedPassword = await bcrypt.hash('password123', 10);
 
-    // Create sample students
-    const students = [
-      {
-        name: 'Alice Johnson',
-        email: 'alice@example.com',
-        password: 'password123',
-        role: 'student'
-      },
-      {
-        name: 'Bob Smith',
-        email: 'bob@example.com',
-        password: 'password123',
-        role: 'student'
-      },
-      {
-        name: 'Charlie Brown',
-        email: 'charlie@example.com',
-        password: 'password123',
-        role: 'student'
-      },
-      {
-        name: 'Diana Prince',
-        email: 'diana@example.com',
-        password: 'password123',
-        role: 'student'
-      },
-      {
-        name: 'Edward Wilson',
-        email: 'edward@example.com',
-        password: 'password123',
-        role: 'student'
-      }
+    const users = [
+      ['John Teacher', 'teacher@example.com', 'teacher'],
+      ['Alice Johnson', 'alice@example.com', 'student'],
+      ['Bob Smith', 'bob@example.com', 'student'],
+      ['Charlie Brown', 'charlie@example.com', 'student'],
+      ['Diana Prince', 'diana@example.com', 'student'],
+      ['Edward Wilson', 'edward@example.com', 'student']
     ];
 
-    for (const studentData of students) {
-      const student = new User(studentData);
-      await student.save();
-      console.log('Created student:', student.email);
-    }
+    // Insert all users in one query
+    await pool.query(
+      'INSERT INTO users (name, email, role, password) VALUES ?',
+      [users.map(user => [...user, hashedPassword])]
+    );
 
     console.log('\n✅ Database seeded successfully!');
     console.log('\n📝 Login credentials:');
     console.log('Teacher: teacher@example.com / password123');
     console.log('\n👥 Students created:');
-    students.forEach(student => {
-      console.log(`- ${student.name} (${student.email})`);
+    users.filter(u => u[2] === 'student').forEach(([name, email]) => {
+      console.log(`- ${name} (${email})`);
     });
 
+    await pool.end();
     process.exit(0);
   } catch (error) {
     console.error('Error seeding database:', error);

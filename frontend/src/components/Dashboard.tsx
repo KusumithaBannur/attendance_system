@@ -1,42 +1,72 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
-import { attendanceAPI, Student, AttendanceRecord } from '../services/api';
+import { attendanceAPI, Student, AttendanceRecord, SavedAttendance } from '../services/api';
 import './Dashboard.css';
+
+// Today's date as 'YYYY-MM-DD' in the browser's local time
+const todayString = () => {
+  const now = new Date();
+  const month = String(now.getMonth() + 1).padStart(2, '0');
+  const day = String(now.getDate()).padStart(2, '0');
+  return `${now.getFullYear()}-${month}-${day}`;
+};
 
 const Dashboard: React.FC = () => {
   const { user, logout } = useAuth();
   const [students, setStudents] = useState<Student[]>([]);
-  const [attendance, setAttendance] = useState<{ [key: string]: 'Present' | 'Absent' }>({});
-  const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
+  const [attendance, setAttendance] = useState<{ [studentId: number]: 'Present' | 'Absent' }>({});
+  const [selectedDate, setSelectedDate] = useState(todayString());
+  const [alreadyMarked, setAlreadyMarked] = useState(false);
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
 
+  // Load the student list once
   useEffect(() => {
+    const fetchStudents = async () => {
+      setLoading(true);
+      try {
+        const response = await attendanceAPI.getStudents();
+        setStudents(response.students);
+      } catch (error: any) {
+        setError('Failed to fetch students: ' + (error.response?.data?.message || error.message));
+      } finally {
+        setLoading(false);
+      }
+    };
     fetchStudents();
   }, []);
 
-  const fetchStudents = async () => {
-    setLoading(true);
-    try {
-      const response = await attendanceAPI.getStudents();
-      setStudents(response.students);
-      
-      // Initialize attendance state with all students marked as Absent
-      const initialAttendance: { [key: string]: 'Present' | 'Absent' } = {};
-      response.students.forEach((student: Student) => {
-        initialAttendance[student._id] = 'Absent';
-      });
-      setAttendance(initialAttendance);
-    } catch (error: any) {
-      setError('Failed to fetch students: ' + (error.response?.data?.message || error.message));
-    } finally {
-      setLoading(false);
-    }
-  };
+  // Whenever the date (or student list) changes, load what was already saved for that date
+  useEffect(() => {
+    if (students.length === 0) return;
 
-  const handleAttendanceChange = (studentId: string, status: 'Present' | 'Absent') => {
+    const loadSavedAttendance = async () => {
+      // Everyone starts as Absent
+      const newAttendance: { [studentId: number]: 'Present' | 'Absent' } = {};
+      students.forEach(student => {
+        newAttendance[student.id] = 'Absent';
+      });
+
+      try {
+        const response = await attendanceAPI.getAttendanceByDate(selectedDate);
+        // Overwrite with any saved records for this date
+        response.records.forEach((record: SavedAttendance) => {
+          newAttendance[record.studentId] = record.status;
+        });
+        setAlreadyMarked(response.records.length > 0);
+      } catch (error: any) {
+        setError('Failed to load saved attendance: ' + (error.response?.data?.message || error.message));
+        setAlreadyMarked(false);
+      }
+
+      setAttendance(newAttendance);
+    };
+    loadSavedAttendance();
+  }, [selectedDate, students]);
+
+  const handleAttendanceChange = (studentId: number, status: 'Present' | 'Absent') => {
     setAttendance(prev => ({
       ...prev,
       [studentId]: status
@@ -49,9 +79,9 @@ const Dashboard: React.FC = () => {
     setError('');
 
     try {
-      const attendanceData: AttendanceRecord[] = Object.entries(attendance).map(([studentId, status]) => ({
-        studentId,
-        status
+      const attendanceData: AttendanceRecord[] = students.map(student => ({
+        studentId: student.id,
+        status: attendance[student.id] || 'Absent'
       }));
 
       const response = await attendanceAPI.markAttendance({
@@ -60,7 +90,8 @@ const Dashboard: React.FC = () => {
       });
 
       setMessage(`Attendance marked successfully for ${response.results.length} students!`);
-      
+      setAlreadyMarked(true);
+
       // Clear message after 3 seconds
       setTimeout(() => setMessage(''), 3000);
     } catch (error: any) {
@@ -71,9 +102,9 @@ const Dashboard: React.FC = () => {
   };
 
   const handleSelectAll = (status: 'Present' | 'Absent') => {
-    const newAttendance: { [key: string]: 'Present' | 'Absent' } = {};
+    const newAttendance: { [studentId: number]: 'Present' | 'Absent' } = {};
     students.forEach(student => {
-      newAttendance[student._id] = status;
+      newAttendance[student.id] = status;
     });
     setAttendance(newAttendance);
   };
@@ -121,6 +152,11 @@ const Dashboard: React.FC = () => {
             </div>
           </div>
 
+          {alreadyMarked && !message && (
+            <div className="info-message">
+              Attendance for this date was already saved. Your changes will update it.
+            </div>
+          )}
           {message && <div className="success-message">{message}</div>}
           {error && <div className="error-message">{error}</div>}
 
@@ -154,7 +190,7 @@ const Dashboard: React.FC = () => {
               </div>
             ) : (
               students.map((student) => (
-                <div key={student._id} className="student-card">
+                <div key={student.id} className="student-card">
                   <div className="student-info">
                     <h3>{student.name}</h3>
                     <p>{student.email}</p>
@@ -163,20 +199,20 @@ const Dashboard: React.FC = () => {
                     <label className="radio-option">
                       <input
                         type="radio"
-                        name={`attendance-${student._id}`}
+                        name={`attendance-${student.id}`}
                         value="Present"
-                        checked={attendance[student._id] === 'Present'}
-                        onChange={() => handleAttendanceChange(student._id, 'Present')}
+                        checked={attendance[student.id] === 'Present'}
+                        onChange={() => handleAttendanceChange(student.id, 'Present')}
                       />
                       <span className="radio-label present">Present</span>
                     </label>
                     <label className="radio-option">
                       <input
                         type="radio"
-                        name={`attendance-${student._id}`}
+                        name={`attendance-${student.id}`}
                         value="Absent"
-                        checked={attendance[student._id] === 'Absent'}
-                        onChange={() => handleAttendanceChange(student._id, 'Absent')}
+                        checked={attendance[student.id] === 'Absent'}
+                        onChange={() => handleAttendanceChange(student.id, 'Absent')}
                       />
                       <span className="radio-label absent">Absent</span>
                     </label>

@@ -1,8 +1,7 @@
 import axios from 'axios';
 
-const API_BASE_URL = process.env.NODE_ENV === 'production'
-  ? 'https://your-render-app.onrender.com/api' // Will update this after deployment
-  : 'http://localhost:5000/api';
+// Set REACT_APP_API_URL when deploying, e.g. https://your-backend.onrender.com/api
+const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000/api';
 
 // Create axios instance
 const api = axios.create({
@@ -36,7 +35,7 @@ api.interceptors.response.use(
 
 // Types
 export interface User {
-  id: string;
+  id: number;
   name: string;
   email: string;
   role: 'teacher' | 'student';
@@ -55,7 +54,7 @@ export interface RegisterData {
 }
 
 export interface AttendanceRecord {
-  studentId: string;
+  studentId: number;
   status: 'Present' | 'Absent';
 }
 
@@ -64,8 +63,17 @@ export interface AttendanceData {
   date?: string;
 }
 
+export interface SavedAttendance {
+  id: number;
+  studentId: number;
+  studentName: string;
+  studentEmail: string;
+  status: 'Present' | 'Absent';
+  date: string;
+}
+
 export interface Student {
-  _id: string;
+  id: number;
   name: string;
   email: string;
   role: string;
@@ -101,7 +109,7 @@ export const attendanceAPI = {
     return response.data;
   },
 
-  getStudentReport: async (studentId: string, startDate?: string, endDate?: string) => {
+  getStudentReport: async (studentId: number, startDate?: string, endDate?: string) => {
     const params = new URLSearchParams();
     if (startDate) params.append('startDate', startDate);
     if (endDate) params.append('endDate', endDate);
@@ -111,7 +119,7 @@ export const attendanceAPI = {
   },
 
   getAttendanceByDate: async (date: string) => {
-    const response = await api.get(`/attendance/date/${date}`);
+    const response = await api.get('/attendance/by-date', { params: { date } });
     return response.data;
   },
 };

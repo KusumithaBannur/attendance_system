@@ -1,6 +1,7 @@
 const express = require('express');
 const jwt = require('jsonwebtoken');
-const User = require('../models/User');
+const bcrypt = require('bcryptjs');
+const { pool } = require('../config/db');
 const router = express.Router();
 
 // Generate JWT token
@@ -8,39 +9,43 @@ const generateToken = (userId) => {
   return jwt.sign({ userId }, process.env.JWT_SECRET, { expiresIn: '7d' });
 };
 
-// Register a new user (student or teacher)
+// Register a new student
 router.post('/register', async (req, res) => {
   try {
-    const { name, email, password, role } = req.body;
+    const { name, email, password } = req.body;
+
+    if (!name || !email || !password || password.length < 6) {
+      return res.status(400).json({ message: 'Name, email and a password of at least 6 characters are required' });
+    }
+
+    const normalizedEmail = email.trim().toLowerCase();
 
     // Check if user already exists
-    const existingUser = await User.findOne({ email });
-    if (existingUser) {
+    const [existing] = await pool.query('SELECT id FROM users WHERE email = ?', [normalizedEmail]);
+    if (existing.length > 0) {
       return res.status(400).json({ message: 'User already exists with this email' });
     }
 
+    // Hash password (10 salt rounds)
+    const hashedPassword = await bcrypt.hash(password, 10);
+
     // Create new user
-    const user = new User({
-      name,
-      email,
-      password,
-      role: role || 'student'
-    });
+    const [result] = await pool.query(
+      'INSERT INTO users (name, email, password, role) VALUES (?, ?, ?, ?)',
+      [name.trim(), normalizedEmail, hashedPassword, 'student']
+    );
 
-    await user.save();
-
-    // Generate token
-    const token = generateToken(user._id);
+    const user = {
+      id: result.insertId,
+      name: name.trim(),
+      email: normalizedEmail,
+      role: 'student'
+    };
 
     res.status(201).json({
       message: 'User registered successfully',
-      token,
-      user: {
-        id: user._id,
-        name: user.name,
-        email: user.email,
-        role: user.role
-      }
+      token: generateToken(user.id),
+      user
     });
   } catch (error) {
     console.error('Registration error:', error);
@@ -53,26 +58,28 @@ router.post('/login', async (req, res) => {
   try {
     const { email, password } = req.body;
 
+    if (!email || !password) {
+      return res.status(400).json({ message: 'Email and password are required' });
+    }
+
     // Find user by email
-    const user = await User.findOne({ email });
+    const [rows] = await pool.query('SELECT * FROM users WHERE email = ?', [email.trim().toLowerCase()]);
+    const user = rows[0];
     if (!user) {
       return res.status(400).json({ message: 'Invalid email or password' });
     }
 
-    // Check password
-    const isPasswordValid = await user.comparePassword(password);
+    // Check password against the stored hash
+    const isPasswordValid = await bcrypt.compare(password, user.password);
     if (!isPasswordValid) {
       return res.status(400).json({ message: 'Invalid email or password' });
     }
 
-    // Generate token
-    const token = generateToken(user._id);
-
     res.json({
       message: 'Login successful',
-      token,
+      token: generateToken(user.id),
       user: {
-        id: user._id,
+        id: user.id,
         name: user.name,
         email: user.email,
         role: user.role
@@ -104,19 +111,12 @@ const verifyToken = (req, res, next) => {
 // Get current user profile
 router.get('/profile', verifyToken, async (req, res) => {
   try {
-    const user = await User.findById(req.userId).select('-password');
-    if (!user) {
+    const [rows] = await pool.query('SELECT id, name, email, role FROM users WHERE id = ?', [req.userId]);
+    if (rows.length === 0) {
       return res.status(404).json({ message: 'User not found' });
     }
 
-    res.json({
-      user: {
-        id: user._id,
-        name: user.name,
-        email: user.email,
-        role: user.role
-      }
-    });
+    res.json({ user: rows[0] });
   } catch (error) {
     console.error('Profile error:', error);
     res.status(500).json({ message: 'Server error' });
